@@ -1,0 +1,15 @@
+[project]
+name = "I-shadow"
+version = "2025.02.09"
+description = "Default template for PDM package"
+authors = [
+    {name = "Katô Taisei", email = "katotaisei064@gmail.com"},
+]
+dependencies = []
+requires-python = "==3.12.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false
