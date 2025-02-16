@@ -2,6 +2,7 @@ import functools
 import json
 import operator
 from collections import Counter
+from copy import copy
 from queue import Queue
 from tkinter import PhotoImage, Text, Tk, ttk
 
@@ -23,11 +24,13 @@ def tokenize_captions(captions):
 
 
 tokenized_captions = Counter()
+total_captions_words = 0
 
 
 def start_shadowing():
-    global tokenized_captions
+    global tokenized_captions, total_captions_words
     tokenized_captions = tokenize_captions(caption_text.get('1.0', 'end'))
+    total_captions_words = tokenized_captions.total()
     start_frame.grid_remove()
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
     global is_shadowing
@@ -37,6 +40,8 @@ def start_shadowing():
 
 audio_queue = Queue()
 last_temp_result = ''
+true_positives = 0
+total_user_words = 0
 
 
 def callback_audio_in(event):
@@ -54,8 +59,20 @@ def callback_audio_in(event):
     # whitespace.
     delete_chars = len(last_temp_result) + 2 if last_temp_result != '' else 1
     shadowing_text.delete(f'end -{delete_chars} chars', 'end')
+    working_tokenized_captions = (tokenized_captions if is_final
+                                  else copy(tokenized_captions))
+    global true_positives, total_user_words
     for word in split_result:
-        shadowing_text.insert('end', word + ' ')
+        is_correct = working_tokenized_captions[word] >= 1
+        if is_correct:
+            working_tokenized_captions[word] -= 1
+            if is_final:
+                true_positives += 1
+        tag = (f"{'' if is_final else 'partial_'}"
+               f"{'correct' if is_correct else 'incorrect'}")
+        shadowing_text.insert('end', word + ' ', tag)
+    if is_final:
+        total_user_words += len(split_result)
     shadowing_text['state'] = 'disabled'
     last_temp_result = '' if is_final else result
     shadowing_text.see('end')
