@@ -30,6 +30,9 @@ def start_shadowing():
     tokenized_captions = tokenize_captions(caption_text.get('1.0', 'end'))
     start_frame.grid_remove()
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
+    global is_shadowing
+    is_shadowing = True
+    root.attributes("-topmost", 1)
 
 
 audio_queue = Queue()
@@ -87,6 +90,7 @@ ys.grid(row=2, column=1, sticky='ns')
 start_frame.grid_rowconfigure(2, weight=1)
 start_frame.grid_columnconfigure(0, weight=1)
 
+is_shadowing = False
 shadowing_frame = ttk.Frame(root)
 mic_on_icon = PhotoImage(file='icon/mic_on.png')
 start_button = ttk.Button(shadowing_frame, image=mic_on_icon)
@@ -106,8 +110,9 @@ shadowing_text.bind('<<audio_in>>', callback_audio_in)
 
 
 def callback_rawinputstream(indata, frames, time, status):
-    audio_queue.put(bytes(indata))
-    shadowing_text.event_generate('<<audio_in>>')
+    if is_shadowing:
+        audio_queue.put(bytes(indata))
+        shadowing_text.event_generate('<<audio_in>>')
 
 
 with sd.RawInputStream(samplerate=samplerate, dtype='int16', channels=1,
