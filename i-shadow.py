@@ -14,6 +14,7 @@ import vosk
 def tokenize_captions_per_line(caption):
     caption = caption.replace('&gt;', '>')
     tokenized = nltk.tokenize.wordpunct_tokenize(caption)
+    tokenized = map(lambda word: word.lower(), tokenized)
     return Counter(tokenized)
 
 
