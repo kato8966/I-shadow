@@ -1,9 +1,40 @@
+import json
+from queue import Queue
 from tkinter import PhotoImage, Text, Tk, ttk
+
+import sounddevice as sd
+import vosk
 
 
 def start_shadowing():
     start_frame.grid_remove()
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
+
+
+audio_queue = Queue()
+last_temp_result = ''
+
+
+def callback_audio_in(event):
+    global last_temp_result
+    is_final = recognizer.AcceptWaveform(audio_queue.get())
+    if is_final:
+        result = json.loads(recognizer.Result())['text']
+    else:
+        result = json.loads(recognizer.PartialResult())['partial']
+        if result == last_temp_result:
+            return
+    split_result = result.split()
+    shadowing_text['state'] = 'normal'
+    # `+ 2` is for the last newline a `Text` widget always puts and a trailing
+    # whitespace.
+    delete_chars = len(last_temp_result) + 2 if last_temp_result != '' else 1
+    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
+    for word in split_result:
+        shadowing_text.insert('end', word + ' ')
+    shadowing_text['state'] = 'disabled'
+    last_temp_result = '' if is_final else result
+    shadowing_text.see('end')
 
 
 root = Tk()
@@ -47,4 +78,17 @@ shadowing_text.grid(row=2, column=0, sticky='nwes')
 shadowing_frame.grid_rowconfigure(2, weight=1)
 shadowing_frame.grid_columnconfigure(0, weight=1)
 
-root.mainloop()
+model = vosk.Model(lang='en-us')
+samplerate = sd.query_devices(kind='input')['default_samplerate']
+recognizer = vosk.KaldiRecognizer(model, int(samplerate))
+shadowing_text.bind('<<audio_in>>', callback_audio_in)
+
+
+def callback_rawinputstream(indata, frames, time, status):
+    audio_queue.put(bytes(indata))
+    shadowing_text.event_generate('<<audio_in>>')
+
+
+with sd.RawInputStream(samplerate=samplerate, dtype='int16', channels=1,
+                       callback=callback_rawinputstream):
+    root.mainloop()
