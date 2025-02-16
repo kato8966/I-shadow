@@ -1,12 +1,33 @@
+import functools
 import json
+import operator
+from collections import Counter
 from queue import Queue
 from tkinter import PhotoImage, Text, Tk, ttk
 
+import nltk
 import sounddevice as sd
 import vosk
 
 
+def tokenize_captions_per_line(caption):
+    caption = caption.replace('&gt;', '>')
+    tokenized = nltk.tokenize.wordpunct_tokenize(caption)
+    return Counter(tokenized)
+
+
+def tokenize_captions(captions):
+    tokenized_captions_per_line = map(tokenize_captions_per_line,
+                                      captions.splitlines())
+    return functools.reduce(operator.add, tokenized_captions_per_line)
+
+
+tokenized_captions = Counter()
+
+
 def start_shadowing():
+    global tokenized_captions
+    tokenized_captions = tokenize_captions(caption_text.get('1.0', 'end'))
     start_frame.grid_remove()
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
 
