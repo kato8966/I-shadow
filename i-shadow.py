@@ -1,5 +1,6 @@
 import functools
 import json
+import logging
 import operator
 from collections import Counter
 from copy import copy
@@ -29,6 +30,7 @@ total_captions_words = 0
 
 
 def start_shadowing():
+    logger.info('start shadowing')
     global tokenized_captions, total_captions_words
     tokenized_captions = tokenize_captions(caption_text.get('1.0', 'end'))
     total_captions_words = tokenized_captions.total()
@@ -67,12 +69,15 @@ def show_result():
 
 
 def finish_shadowing():
+    logger.info('finish shadowing')
     global is_shadowing
     is_shadowing = False
     shadowing_frame.grid_remove()
 
     if audio_queue.empty():
         show_result()
+    else:
+        logger.debug(f'audio_queue size: {audio_queue.qsize()}')
 
 
 audio_queue = Queue()
@@ -82,6 +87,7 @@ total_user_words = 0
 
 
 def callback_audio_in(event):
+    logger.info('callback audio in')
     global last_temp_result
     is_final = recognizer.AcceptWaveform(audio_queue.get())
     if is_final:
@@ -118,6 +124,8 @@ def callback_audio_in(event):
 
     if not is_shadowing and audio_queue.empty():
         show_result()
+    elif not is_shadowing:
+        logger.debug(f'audio_queue size: {audio_queue.qsize()}')
 
 
 root = Tk()
@@ -176,6 +184,9 @@ pr_result.grid(row=0, column=0)
 f1_score_label.grid(row=1, column=0)
 result_frame.grid_rowconfigure(1, weight=1)
 result_frame.grid_columnconfigure(0, weight=1)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 model = vosk.Model(lang='en-us')
 samplerate = sd.query_devices(kind='input')['default_samplerate']
