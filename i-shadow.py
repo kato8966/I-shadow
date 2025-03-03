@@ -2,6 +2,8 @@ import functools
 import json
 import logging
 import operator
+import os
+import shutil
 from collections import Counter
 from copy import copy
 from queue import Queue
@@ -128,11 +130,22 @@ def callback_audio_in(event):
         logger.debug(f'audio_queue size: {audio_queue.qsize()}')
 
 
+def on_closing():
+    with open('config-geometry.json', 'w') as fout:
+        json.dump(root.geometry(), fout)
+    root.destroy()
+
+
 root = Tk()
-root.geometry('600x600')
+if not os.path.exists('config-geometry.json'):
+    shutil.copy('config-geometry-default.json', 'config-geometry.json')
+with open('config-geometry.json') as fin:
+    root.geometry(json.load(fin))
 root.title('I-shadow')
 root.rowconfigure(0, weight=1)
 root.columnconfigure(0, weight=1)
+root.protocol('WM_DELETE_WINDOW', on_closing)
+
 
 start_frame = ttk.Frame(root)
 start_frame.grid(row=0, column=0, sticky='nwes')
