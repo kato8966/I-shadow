@@ -5,7 +5,6 @@ import operator
 import os
 import shutil
 from collections import Counter
-from copy import copy
 from queue import Queue
 from tkinter import PhotoImage, StringVar, Text, Tk, ttk
 
@@ -80,44 +79,58 @@ def finish_shadowing():
 
 
 audio_queue = Queue()
-last_temp_result = ''
+last_temp_result = []
 true_positives = 0
 total_user_words = 0
 
 
 def process_audio(audio):
-    global last_temp_result
     is_final = recognizer.AcceptWaveform(audio)
     if is_final:
         result = json.loads(recognizer.Result())['text']
     else:
         result = json.loads(recognizer.PartialResult())['partial']
-        if rawinputstream.stopped and audio_queue.empty():
-            is_final = True
-        elif result == last_temp_result:
-            return
     split_result = result.split()
-    shadowing_text['state'] = 'normal'
-    # `+ 2` is for the last newline a `Text` widget always puts and a trailing
-    # whitespace.
-    delete_chars = len(last_temp_result) + 2 if last_temp_result != '' else 1
-    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
-    working_tokenized_captions = (tokenized_captions if is_final
-                                  else copy(tokenized_captions))
+
+    if is_final:
+        temp_result_first_different_index = 0
+    else:
+        min_len = min(len(last_temp_result), len(split_result))
+        temp_result_first_different_index = min_len
+        for i in range(min_len):
+            if last_temp_result[i][0] != split_result[i]:
+                temp_result_first_different_index = i
+                break
+
+    delete_words = len(last_temp_result) - temp_result_first_different_index
+    delete_chars = 1  # delete the last newline a `Text` widget always puts
+
     global true_positives, total_user_words
-    for word in split_result:
-        is_correct = working_tokenized_captions[word] >= 1
+    total_user_words -= delete_words
+    for _ in range(delete_words):
+        word, is_correct = last_temp_result.pop()
+        delete_chars += len(word) + 1
         if is_correct:
-            working_tokenized_captions[word] -= 1
-            if is_final:
-                true_positives += 1
+            tokenized_captions[word] += 1
+            true_positives -= 1
+
+    shadowing_text['state'] = 'normal'
+    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
+
+    total_user_words += len(split_result) - temp_result_first_different_index
+    for word in split_result[temp_result_first_different_index:]:
+        is_correct = tokenized_captions[word] >= 1
+        if is_correct:
+            tokenized_captions[word] -= 1
+            true_positives += 1
+
+        if not is_final:
+            last_temp_result.append((word, is_correct))
+
         tag = (f"{'' if is_final else 'partial_'}"
                f"{'correct' if is_correct else 'incorrect'}")
         shadowing_text.insert('end', word + ' ', tag)
-    if is_final:
-        total_user_words += len(split_result)
     shadowing_text['state'] = 'disabled'
-    last_temp_result = '' if is_final else result
     shadowing_text.see('end')
 
     if rawinputstream.stopped and audio_queue.empty():
