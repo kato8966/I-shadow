@@ -231,6 +231,7 @@ rawinputstream = sd.RawInputStream(samplerate=samplerate, dtype='int16',
                                    callback=callback_rawinputstream)
 
 process_audio_queue()
-root.mainloop()
-
-rawinputstream.close()
+try:
+    root.mainloop()
+finally:
+    rawinputstream.close()
