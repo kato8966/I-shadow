@@ -38,9 +38,8 @@ def start_shadowing():
     total_captions_words = tokenized_captions.total()
     start_frame.grid_remove()
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
-    global is_shadowing
-    is_shadowing = True
     root.attributes("-topmost", 1)
+    rawinputstream.start()
 
 
 def calculate_f1_score():
@@ -72,14 +71,12 @@ def show_result():
 
 def finish_shadowing():
     logger.info('finish shadowing')
-    global is_shadowing
-    is_shadowing = False
+    rawinputstream.stop()
+    logger.info('rawinputstream stopped')
     shadowing_frame.grid_remove()
 
     if audio_queue.empty():
         show_result()
-    else:
-        logger.debug(f'audio_queue size: {audio_queue.qsize()}')
 
 
 audio_queue = Queue()
@@ -88,15 +85,14 @@ true_positives = 0
 total_user_words = 0
 
 
-def callback_audio_in(event):
-    logger.info('callback audio in')
+def process_audio(audio):
     global last_temp_result
-    is_final = recognizer.AcceptWaveform(audio_queue.get())
+    is_final = recognizer.AcceptWaveform(audio)
     if is_final:
         result = json.loads(recognizer.Result())['text']
     else:
         result = json.loads(recognizer.PartialResult())['partial']
-        if not is_shadowing and audio_queue.empty():
+        if rawinputstream.stopped and audio_queue.empty():
             is_final = True
         elif result == last_temp_result:
             return
@@ -124,10 +120,16 @@ def callback_audio_in(event):
     last_temp_result = '' if is_final else result
     shadowing_text.see('end')
 
-    if not is_shadowing and audio_queue.empty():
+    if rawinputstream.stopped and audio_queue.empty():
         show_result()
-    elif not is_shadowing:
-        logger.debug(f'audio_queue size: {audio_queue.qsize()}')
+
+
+def process_audio_queue():
+    for _ in range(audio_queue.qsize()):
+        process_audio(audio_queue.get())
+        logger.debug('audio_queue popped. '
+                     f'remaining queue size: {audio_queue.qsize()}')
+    root.after(100, process_audio_queue)
 
 
 def on_closing():
@@ -170,7 +172,6 @@ ys.grid(row=2, column=1, sticky='ns')
 start_frame.grid_rowconfigure(2, weight=1)
 start_frame.grid_columnconfigure(0, weight=1)
 
-is_shadowing = False
 shadowing_frame = ttk.Frame(root)
 mic_on_icon = PhotoImage(file='icon/mic_on.png')
 stop_button = ttk.Button(shadowing_frame, image=mic_on_icon,
@@ -204,15 +205,19 @@ logging.basicConfig(level=logging.DEBUG)
 model = vosk.Model(lang='en-us')
 samplerate = sd.query_devices(kind='input')['default_samplerate']
 recognizer = vosk.KaldiRecognizer(model, int(samplerate))
-shadowing_text.bind('<<audio_in>>', callback_audio_in)
 
 
 def callback_rawinputstream(indata, frames, time, status):
-    if is_shadowing:
-        audio_queue.put(bytes(indata))
-        shadowing_text.event_generate('<<audio_in>>')
+    audio_queue.put(bytes(indata))
+    logger.debug('audio_queue pushed. '
+                 f'remaining queue size: {audio_queue.qsize()}')
 
 
-with sd.RawInputStream(samplerate=samplerate, dtype='int16', channels=1,
-                       callback=callback_rawinputstream):
-    root.mainloop()
+rawinputstream = sd.RawInputStream(samplerate=samplerate, dtype='int16',
+                                   channels=1,
+                                   callback=callback_rawinputstream)
+
+process_audio_queue()
+root.mainloop()
+
+rawinputstream.close()
