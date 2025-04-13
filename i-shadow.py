@@ -4,8 +4,10 @@ import logging
 import operator
 import os
 import shutil
+import threading
 from collections import Counter
 from queue import Queue
+from time import time
 from tkinter import PhotoImage, StringVar, Text, Tk, ttk
 
 import nltk
@@ -29,6 +31,92 @@ def tokenize_captions(captions):
 tokenized_captions = Counter()
 total_captions_words = 0
 
+audio_queue = Queue()
+trans_queue = Queue()
+last_temp_trans = []
+true_positives = 0
+total_user_words = 0
+last_time_temp_result_put = time()
+
+
+def process_audio(audio):
+    INTERVAL = 0.1
+
+    is_final = recognizer.AcceptWaveform(audio)
+    if is_final:
+        result = json.loads(recognizer.Result())['text']
+    else:
+        result = json.loads(recognizer.PartialResult())['partial']
+
+    global last_time_temp_result_put
+    if (not is_final and not rawinputstream.stopped
+            and time() - last_time_temp_result_put < INTERVAL):
+        return
+
+    trans_queue.put((result, is_final))
+    if not is_final:
+        last_time_temp_result_put = time()
+    root.event_generate('<<TransQueuePut>>')
+
+
+def process_trans(e):
+    (trans, is_final) = trans_queue.get()
+    split_trans = trans.split()
+
+    if is_final:
+        temp_trans_first_different_index = 0
+    else:
+        min_len = min(len(last_temp_trans), len(split_trans))
+        temp_trans_first_different_index = min_len
+        for i in range(min_len):
+            if last_temp_trans[i][0] != split_trans[i]:
+                temp_trans_first_different_index = i
+                break
+
+    delete_words = len(last_temp_trans) - temp_trans_first_different_index
+    delete_chars = 1  # delete the last newline a `Text` widget always puts
+
+    global true_positives, total_user_words
+    total_user_words -= delete_words
+    for _ in range(delete_words):
+        word, is_correct = last_temp_trans.pop()
+        delete_chars += len(word) + 1
+        if is_correct:
+            tokenized_captions[word] += 1
+            true_positives -= 1
+
+    shadowing_text['state'] = 'normal'
+    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
+
+    total_user_words += len(split_trans) - temp_trans_first_different_index
+    for word in split_trans[temp_trans_first_different_index:]:
+        is_correct = tokenized_captions[word] >= 1
+        if is_correct:
+            tokenized_captions[word] -= 1
+            true_positives += 1
+
+        if not is_final:
+            last_temp_trans.append((word, is_correct))
+
+        tag = (f"{'' if is_final else 'partial_'}"
+               f"{'correct' if is_correct else 'incorrect'}")
+        shadowing_text.insert('end', word + ' ', tag)
+    shadowing_text['state'] = 'disabled'
+    shadowing_text.see('end')
+
+    trans_queue.task_done()
+
+
+def process_audio_queue():
+    while not rawinputstream.stopped or not audio_queue.empty():
+        if not audio_queue.empty():
+            process_audio(audio_queue.get())
+    trans_queue.join()
+    root.event_generate('<<AllTransProcessed>>')
+
+
+audio_process_thread = threading.Thread(target=process_audio_queue)
+
 
 def start_shadowing():
     logger.info('start shadowing')
@@ -39,6 +127,7 @@ def start_shadowing():
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
     root.attributes("-topmost", 1)
     rawinputstream.start()
+    audio_process_thread.start()
 
 
 def calculate_f1_score():
@@ -60,7 +149,7 @@ def calculate_f1_score():
     return p, r, f1
 
 
-def show_result():
+def show_result(e):
     result_frame.grid(row=0, column=0, sticky='nwe')
     p, r, f1 = calculate_f1_score()
     pr_result_content.set(f'Precision: {p}\nRecall: {r}\n'
@@ -73,76 +162,6 @@ def finish_shadowing():
     rawinputstream.stop()
     logger.info('rawinputstream stopped')
     shadowing_frame.grid_remove()
-
-    if audio_queue.empty():
-        show_result()
-
-
-audio_queue = Queue()
-last_temp_result = []
-true_positives = 0
-total_user_words = 0
-
-
-def process_audio(audio):
-    is_final = recognizer.AcceptWaveform(audio)
-    if is_final:
-        result = json.loads(recognizer.Result())['text']
-    else:
-        result = json.loads(recognizer.PartialResult())['partial']
-    split_result = result.split()
-
-    if is_final:
-        temp_result_first_different_index = 0
-    else:
-        min_len = min(len(last_temp_result), len(split_result))
-        temp_result_first_different_index = min_len
-        for i in range(min_len):
-            if last_temp_result[i][0] != split_result[i]:
-                temp_result_first_different_index = i
-                break
-
-    delete_words = len(last_temp_result) - temp_result_first_different_index
-    delete_chars = 1  # delete the last newline a `Text` widget always puts
-
-    global true_positives, total_user_words
-    total_user_words -= delete_words
-    for _ in range(delete_words):
-        word, is_correct = last_temp_result.pop()
-        delete_chars += len(word) + 1
-        if is_correct:
-            tokenized_captions[word] += 1
-            true_positives -= 1
-
-    shadowing_text['state'] = 'normal'
-    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
-
-    total_user_words += len(split_result) - temp_result_first_different_index
-    for word in split_result[temp_result_first_different_index:]:
-        is_correct = tokenized_captions[word] >= 1
-        if is_correct:
-            tokenized_captions[word] -= 1
-            true_positives += 1
-
-        if not is_final:
-            last_temp_result.append((word, is_correct))
-
-        tag = (f"{'' if is_final else 'partial_'}"
-               f"{'correct' if is_correct else 'incorrect'}")
-        shadowing_text.insert('end', word + ' ', tag)
-    shadowing_text['state'] = 'disabled'
-    shadowing_text.see('end')
-
-    if rawinputstream.stopped and audio_queue.empty():
-        show_result()
-
-
-def process_audio_queue():
-    for _ in range(audio_queue.qsize()):
-        process_audio(audio_queue.get())
-        logger.debug('audio_queue popped. '
-                     f'remaining queue size: {audio_queue.qsize()}')
-    root.after(100, process_audio_queue)
 
 
 def on_closing():
@@ -160,6 +179,8 @@ root.title('I-shadow')
 root.rowconfigure(0, weight=1)
 root.columnconfigure(0, weight=1)
 root.protocol('WM_DELETE_WINDOW', on_closing)
+root.bind('<<TransQueuePut>>', process_trans)
+root.bind('<<AllTransProcessed>>', show_result)
 
 
 start_frame = ttk.Frame(root)
@@ -230,7 +251,6 @@ rawinputstream = sd.RawInputStream(samplerate=samplerate, dtype='int16',
                                    channels=1,
                                    callback=callback_rawinputstream)
 
-process_audio_queue()
 try:
     root.mainloop()
 finally:
