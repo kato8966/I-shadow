@@ -106,11 +106,16 @@ def process_trans(e):
 
     trans_queue.task_done()
 
+    logger.debug('trans_queue popped. '
+                 f'remaining queue size: {trans_queue.qsize()}')
+
 
 def process_audio_queue():
     while not rawinputstream.stopped or not audio_queue.empty():
         if not audio_queue.empty():
             process_audio(audio_queue.get())
+            logger.debug('audio_queue popped. '
+                         f'remaining queue size: {audio_queue.qsize()}')
     trans_queue.join()
     root.event_generate('<<AllTransProcessed>>')
 
