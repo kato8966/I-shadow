@@ -15,31 +15,31 @@ import sounddevice as sd
 import vosk
 
 
-def tokenize_captions_per_line(caption):
+def tokenize_captions_per_line(caption: str) -> Counter[str]:
     caption = caption.replace('&gt;', '>')
     tokenized = nltk.tokenize.wordpunct_tokenize(caption)
-    tokenized = map(lambda word: word.lower(), tokenized)
-    return Counter(tokenized)
+    lowered_tokenized = map(lambda word: word.lower(), tokenized)
+    return Counter(lowered_tokenized)
 
 
-def tokenize_captions(captions):
+def tokenize_captions(captions: str) -> Counter[str]:
     tokenized_captions_per_line = map(tokenize_captions_per_line,
                                       captions.splitlines())
     return functools.reduce(operator.add, tokenized_captions_per_line)
 
 
-tokenized_captions = Counter()
+tokenized_captions: Counter[str] = Counter()
 total_captions_words = 0
 
-audio_queue = Queue()
-trans_queue = Queue()
-last_temp_trans = []
+audio_queue: Queue[bytes] = Queue()
+trans_queue: Queue[tuple[str, bool]] = Queue()
+last_temp_trans: list[str] = []
 true_positives = 0
 total_user_words = 0
 last_time_temp_result_put = time()
 
 
-def process_audio(audio):
+def process_audio(audio: bytes) -> None:
     INTERVAL = 0.1
 
     is_final = recognizer.AcceptWaveform(audio)
