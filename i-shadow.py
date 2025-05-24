@@ -242,7 +242,9 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 model = vosk.Model(lang='en-us')
-samplerate = sd.query_devices(kind='input')['default_samplerate']
+device = sd.query_devices(kind='input')
+assert isinstance(device, dict)
+samplerate = device['default_samplerate']
 recognizer = vosk.KaldiRecognizer(model, int(samplerate))
 
 
