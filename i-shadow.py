@@ -4,7 +4,6 @@ import logging
 import operator
 import os
 import shutil
-import threading
 from collections import Counter
 from queue import Queue
 from time import time
@@ -32,8 +31,7 @@ tokenized_captions: Counter[str] = Counter()
 total_captions_words = 0
 
 audio_queue: Queue[bytes] = Queue()
-trans_queue: Queue[tuple[str, bool]] = Queue()
-last_temp_trans: list[str] = []
+last_temp_trans: list[tuple[str, bool]] = []
 true_positives = 0
 total_user_words = 0
 last_time_temp_result_put = time()
@@ -53,14 +51,12 @@ def process_audio(audio: bytes) -> None:
             and time() - last_time_temp_result_put < INTERVAL):
         return
 
-    trans_queue.put((result, is_final))
     if not is_final:
         last_time_temp_result_put = time()
-    root.event_generate('<<TransQueuePut>>')
+    process_trans(result, is_final)
 
 
-def process_trans(e):
-    (trans, is_final) = trans_queue.get()
+def process_trans(trans: str, is_final: bool) -> None:
     split_trans = trans.split()
 
     if is_final:
@@ -104,23 +100,16 @@ def process_trans(e):
     shadowing_text['state'] = 'disabled'
     shadowing_text.see('end')
 
-    trans_queue.task_done()
-
-    logger.debug('trans_queue popped. '
-                 f'remaining queue size: {trans_queue.qsize()}')
-
 
 def process_audio_queue():
-    while not rawinputstream.stopped or not audio_queue.empty():
-        if not audio_queue.empty():
-            process_audio(audio_queue.get())
-            logger.debug('audio_queue popped. '
-                         f'remaining queue size: {audio_queue.qsize()}')
-    trans_queue.join()
-    root.event_generate('<<AllTransProcessed>>')
-
-
-audio_process_thread = threading.Thread(target=process_audio_queue)
+    if rawinputstream.stopped and audio_queue.empty():
+        show_result()
+        return
+    if not audio_queue.empty():
+        process_audio(audio_queue.get())
+        logger.debug('audio_queue popped. '
+                     f'remaining queue size: {audio_queue.qsize()}')
+    root.after_idle(process_audio_queue)
 
 
 def start_shadowing():
@@ -132,7 +121,7 @@ def start_shadowing():
     shadowing_frame.grid(row=0, column=0, sticky='nwes')
     root.attributes("-topmost", 1)
     rawinputstream.start()
-    audio_process_thread.start()
+    process_audio_queue()
 
 
 def calculate_f1_score():
@@ -154,7 +143,7 @@ def calculate_f1_score():
     return p, r, f1
 
 
-def show_result(e):
+def show_result():
     result_frame.grid(row=0, column=0, sticky='nwe')
     p, r, f1 = calculate_f1_score()
     pr_result_content.set(f'Precision: {p}\nRecall: {r}\n'
@@ -184,8 +173,6 @@ root.title('I-shadow')
 root.rowconfigure(0, weight=1)
 root.columnconfigure(0, weight=1)
 root.protocol('WM_DELETE_WINDOW', on_closing)
-root.bind('<<TransQueuePut>>', process_trans)
-root.bind('<<AllTransProcessed>>', show_result)
 
 
 start_frame = ttk.Frame(root)
