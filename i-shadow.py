@@ -226,7 +226,7 @@ result_frame.grid_rowconfigure(1, weight=1)
 result_frame.grid_columnconfigure(0, weight=1)
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 
 model = vosk.Model(lang='en-us')
 device = sd.query_devices(kind='input')
