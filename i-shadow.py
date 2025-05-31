@@ -116,6 +116,16 @@ class IShadowApp:
         self.shadowing_frame.grid_rowconfigure(2, weight=1)
         self.shadowing_frame.grid_columnconfigure(0, weight=1)
 
+        self.processing_audio_frame = ttk.Frame(self.root)
+        self.processed_audio_queue_percent = StringVar()
+        self.processed_audio_queue_percent_label = ttk.Label(
+            self.processing_audio_frame,
+            textvariable=self.processed_audio_queue_percent
+        )
+        self.processed_audio_queue_percent_label.grid(row=0, column=0)
+        self.processing_audio_frame.grid_rowconfigure(0, weight=1)
+        self.processing_audio_frame.grid_columnconfigure(0, weight=1)
+
         self.result_frame = ttk.Frame(self.root)
         self.pr_result_content = StringVar()
         self.pr_result = ttk.Label(
@@ -211,6 +221,15 @@ class IShadowApp:
                 'audio_queue popped. '
                 f'remaining queue size: {self.audio_queue.qsize()}'
             )
+
+        if self.rawinputstream.stopped:
+            percent = round(
+                (self._audio_queue_size_when_finished_shadowing - self.audio_queue.qsize()) / self._audio_queue_size_when_finished_shadowing * 100  # noqa: E501
+            ) if self._audio_queue_size_when_finished_shadowing > 0 else 100
+            self.processed_audio_queue_percent.set(
+                f'Processing audio: {percent}% done'
+            )
+
         if self.rawinputstream.stopped and self.audio_queue.empty():
             self.show_result()
         else:
@@ -250,6 +269,7 @@ class IShadowApp:
         return p, r, f1
 
     def show_result(self):
+        self.processing_audio_frame.grid_remove()
         self.result_frame.grid(row=0, column=0, sticky='nwe')
         p, r, f1 = self.calculate_f1_score()
         self.pr_result_content.set(
@@ -262,6 +282,13 @@ class IShadowApp:
         self.rawinputstream.stop()
         self.logger.info('rawinputstream stopped')
         self.shadowing_frame.grid_remove()
+        self.processing_audio_frame.grid(
+            row=0, column=0, sticky='nwe'
+        )
+        self._audio_queue_size_when_finished_shadowing = (
+            self.audio_queue.qsize()
+        )
+        self.processed_audio_queue_percent.set('Processing audio: 0% done')
 
     def on_closing(self):
         with open('config-geometry.json', 'w') as fout:
