@@ -102,14 +102,16 @@ def process_trans(trans: str, is_final: bool) -> None:
 
 
 def process_audio_queue():
-    if rawinputstream.stopped and audio_queue.empty():
-        show_result()
-        return
-    if not audio_queue.empty():
+    INTERVAL = 0.1
+    loop_begin_time = time()
+    while time() - loop_begin_time < INTERVAL and not audio_queue.empty():
         process_audio(audio_queue.get())
         logger.debug('audio_queue popped. '
                      f'remaining queue size: {audio_queue.qsize()}')
-    root.after_idle(process_audio_queue)
+    if rawinputstream.stopped and audio_queue.empty():
+        show_result()
+    else:
+        root.after_idle(process_audio_queue)
 
 
 def start_shadowing():
