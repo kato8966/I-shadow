@@ -14,240 +14,274 @@ import sounddevice as sd
 import vosk
 
 
-def tokenize_captions_per_line(caption: str) -> Counter[str]:
-    caption = caption.replace('&gt;', '>')
-    tokenized = nltk.tokenize.wordpunct_tokenize(caption)
-    lowered_tokenized = map(lambda word: word.lower(), tokenized)
-    return Counter(lowered_tokenized)
+class IShadowApp:
+    def __init__(self) -> None:
+        self.tokenized_captions: Counter[str] = Counter()
+        self.total_captions_words = 0
+        self.audio_queue: Queue[bytes] = Queue()
+        self.last_temp_trans: list[tuple[str, bool]] = []
+        self.true_positives = 0
+        self.total_user_words = 0
+        self.last_time_temp_result_put = time()
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.WARNING)
+        self.model = vosk.Model(lang='en-us')
+        device = sd.query_devices(kind='input')
+        assert isinstance(device, dict)
+        self.samplerate = device['default_samplerate']
+        self.recognizer = vosk.KaldiRecognizer(
+            self.model, int(self.samplerate)
+        )
+        self.root = Tk()
+        if not os.path.exists('config-geometry.json'):
+            shutil.copy(
+                'config-geometry-default.json',
+                'config-geometry.json'
+            )
+        with open('config-geometry.json') as fin:
+            self.root.geometry(json.load(fin))
+        self.root.title('I-shadow')
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
+        self.setup_frames()
+        self.rawinputstream = sd.RawInputStream(
+            samplerate=self.samplerate,
+            dtype='int16',
+            channels=1,
+            callback=self.callback_rawinputstream
+        )
 
+    def setup_frames(self):
+        self.start_frame = ttk.Frame(self.root)
+        self.start_frame.grid(row=0, column=0, sticky='nwes')
+        self.mic_off_icon = PhotoImage(file='icon/mic_off.png')
+        self.start_button = ttk.Button(
+            self.start_frame,
+            image=self.mic_off_icon,
+            command=self.start_shadowing
+        )
+        self.start_button.grid(row=0, column=0, columnspan=2)
+        notice = ttk.Label(
+            self.start_frame,
+            text='The icon is designed by SumberRejeki from Flaticon'
+        )
+        notice.grid(row=1, column=0, columnspan=2)
+        self.caption_text = Text(self.start_frame, wrap='none')
+        xs = ttk.Scrollbar(
+            self.start_frame,
+            orient='horizontal',
+            command=self.caption_text.xview
+        )
+        ys = ttk.Scrollbar(
+            self.start_frame,
+            orient='vertical',
+            command=self.caption_text.yview
+        )
+        self.caption_text['xscrollcommand'] = xs.set
+        self.caption_text['yscrollcommand'] = ys.set
+        self.caption_text.grid(row=2, column=0, sticky='nwes')
+        xs.grid(row=3, column=0, sticky='we')
+        ys.grid(row=2, column=1, sticky='ns')
+        self.start_frame.grid_rowconfigure(2, weight=1)
+        self.start_frame.grid_columnconfigure(0, weight=1)
 
-def tokenize_captions(captions: str) -> Counter[str]:
-    tokenized_captions_per_line = map(tokenize_captions_per_line,
-                                      captions.splitlines())
-    return functools.reduce(operator.add, tokenized_captions_per_line)
+        self.shadowing_frame = ttk.Frame(self.root)
+        self.mic_on_icon = PhotoImage(file='icon/mic_on.png')
+        self.stop_button = ttk.Button(
+            self.shadowing_frame,
+            image=self.mic_on_icon,
+            command=self.finish_shadowing
+        )
+        self.stop_button.grid(row=0, column=0)
+        notice = ttk.Label(
+            self.shadowing_frame,
+            text='The icon is designed by SumberRejeki from Flaticon'
+        )
+        notice.grid(row=1, column=0)
+        self.shadowing_text = Text(
+            self.shadowing_frame,
+            wrap='word',
+            state='disabled'
+        )
+        self.shadowing_text.tag_configure('correct', foreground='#00FF00')
+        self.shadowing_text.tag_configure('incorrect', foreground='#FF0000')
+        self.shadowing_text.tag_configure(
+            'partial_correct', foreground='#CCFFCC'
+        )
+        self.shadowing_text.tag_configure(
+            'partial_incorrect', foreground='#FFCCCC'
+        )
+        self.shadowing_text.grid(row=2, column=0, sticky='nwes')
+        self.shadowing_frame.grid_rowconfigure(2, weight=1)
+        self.shadowing_frame.grid_columnconfigure(0, weight=1)
 
+        self.result_frame = ttk.Frame(self.root)
+        self.pr_result_content = StringVar()
+        self.pr_result = ttk.Label(
+            self.result_frame,
+            textvariable=self.pr_result_content
+        )
+        self.f1_score = StringVar()
+        self.f1_score_label = ttk.Label(
+            self.result_frame,
+            textvariable=self.f1_score
+        )
+        self.pr_result.grid(row=0, column=0)
+        self.f1_score_label.grid(row=1, column=0)
+        self.result_frame.grid_rowconfigure(1, weight=1)
+        self.result_frame.grid_columnconfigure(0, weight=1)
 
-tokenized_captions: Counter[str] = Counter()
-total_captions_words = 0
+    def tokenize_captions_per_line(self, caption: str) -> Counter[str]:
+        caption = caption.replace('&gt;', '>')
+        tokenized = nltk.tokenize.wordpunct_tokenize(caption)
+        lowered_tokenized = map(lambda word: word.lower(), tokenized)
+        return Counter(lowered_tokenized)
 
-audio_queue: Queue[bytes] = Queue()
-last_temp_trans: list[tuple[str, bool]] = []
-true_positives = 0
-total_user_words = 0
-last_time_temp_result_put = time()
+    def tokenize_captions(self, captions: str) -> Counter[str]:
+        tokenized_captions_per_line = map(self.tokenize_captions_per_line,
+                                          captions.splitlines())
+        return functools.reduce(operator.add, tokenized_captions_per_line)
 
-
-def process_audio(audio: bytes) -> None:
-    INTERVAL = 0.1
-
-    is_final = recognizer.AcceptWaveform(audio)
-    if is_final:
-        result = json.loads(recognizer.Result())['text']
-    else:
-        result = json.loads(recognizer.PartialResult())['partial']
-
-    global last_time_temp_result_put
-    if (not is_final and not rawinputstream.stopped
-            and time() - last_time_temp_result_put < INTERVAL):
-        return
-
-    if not is_final:
-        last_time_temp_result_put = time()
-    process_trans(result, is_final)
-
-
-def process_trans(trans: str, is_final: bool) -> None:
-    split_trans = trans.split()
-
-    if is_final:
-        temp_trans_first_different_index = 0
-    else:
-        min_len = min(len(last_temp_trans), len(split_trans))
-        temp_trans_first_different_index = min_len
-        for i in range(min_len):
-            if last_temp_trans[i][0] != split_trans[i]:
-                temp_trans_first_different_index = i
-                break
-
-    delete_words = len(last_temp_trans) - temp_trans_first_different_index
-    delete_chars = 1  # delete the last newline a `Text` widget always puts
-
-    global true_positives, total_user_words
-    total_user_words -= delete_words
-    for _ in range(delete_words):
-        word, is_correct = last_temp_trans.pop()
-        delete_chars += len(word) + 1
-        if is_correct:
-            tokenized_captions[word] += 1
-            true_positives -= 1
-
-    shadowing_text['state'] = 'normal'
-    shadowing_text.delete(f'end -{delete_chars} chars', 'end')
-
-    total_user_words += len(split_trans) - temp_trans_first_different_index
-    for word in split_trans[temp_trans_first_different_index:]:
-        is_correct = tokenized_captions[word] >= 1
-        if is_correct:
-            tokenized_captions[word] -= 1
-            true_positives += 1
-
+    def process_audio(self, audio: bytes) -> None:
+        INTERVAL = 0.1
+        is_final = self.recognizer.AcceptWaveform(audio)
+        if is_final:
+            result = json.loads(self.recognizer.Result())['text']
+        else:
+            result = json.loads(self.recognizer.PartialResult())['partial']
+        if (not is_final and not self.rawinputstream.stopped
+                and time() - self.last_time_temp_result_put < INTERVAL):
+            return
         if not is_final:
-            last_temp_trans.append((word, is_correct))
+            self.last_time_temp_result_put = time()
+        self.process_trans(result, is_final)
 
-        tag = (f"{'' if is_final else 'partial_'}"
-               f"{'correct' if is_correct else 'incorrect'}")
-        shadowing_text.insert('end', word + ' ', tag)
-    shadowing_text['state'] = 'disabled'
-    shadowing_text.see('end')
+    def process_trans(self, trans: str, is_final: bool) -> None:
+        split_trans = trans.split()
+        if is_final:
+            temp_trans_first_different_index = 0
+        else:
+            min_len = min(len(self.last_temp_trans), len(split_trans))
+            temp_trans_first_different_index = min_len
+            for i in range(min_len):
+                if self.last_temp_trans[i][0] != split_trans[i]:
+                    temp_trans_first_different_index = i
+                    break
+        delete_words = (
+            len(self.last_temp_trans) - temp_trans_first_different_index
+        )
+        delete_chars = 1  # delete the last newline a `Text` widget always puts
+        self.total_user_words -= delete_words
+        for _ in range(delete_words):
+            word, is_correct = self.last_temp_trans.pop()
+            delete_chars += len(word) + 1
+            if is_correct:
+                self.tokenized_captions[word] += 1
+                self.true_positives -= 1
+        self.shadowing_text['state'] = 'normal'
+        self.shadowing_text.delete(f'end -{delete_chars} chars', 'end')
+        self.total_user_words += (
+            len(split_trans) - temp_trans_first_different_index
+        )
+        for word in split_trans[temp_trans_first_different_index:]:
+            is_correct = self.tokenized_captions[word] >= 1
+            if is_correct:
+                self.tokenized_captions[word] -= 1
+                self.true_positives += 1
+            if not is_final:
+                self.last_temp_trans.append((word, is_correct))
+            tag = (
+                f"{'' if is_final else 'partial_'}"
+                f"{'correct' if is_correct else 'incorrect'}"
+            )
+            self.shadowing_text.insert('end', word + ' ', tag)
+        self.shadowing_text['state'] = 'disabled'
+        self.shadowing_text.see('end')
 
+    def process_audio_queue(self):
+        INTERVAL = 0.1
+        loop_begin_time = time()
+        while (
+            time() - loop_begin_time < INTERVAL and
+            not self.audio_queue.empty()
+        ):
+            self.process_audio(self.audio_queue.get())
+            self.logger.debug(
+                'audio_queue popped. '
+                f'remaining queue size: {self.audio_queue.qsize()}'
+            )
+        if self.rawinputstream.stopped and self.audio_queue.empty():
+            self.show_result()
+        else:
+            self.root.after_idle(self.process_audio_queue)
 
-def process_audio_queue():
-    INTERVAL = 0.1
-    loop_begin_time = time()
-    while time() - loop_begin_time < INTERVAL and not audio_queue.empty():
-        process_audio(audio_queue.get())
-        logger.debug('audio_queue popped. '
-                     f'remaining queue size: {audio_queue.qsize()}')
-    if rawinputstream.stopped and audio_queue.empty():
-        show_result()
-    else:
-        root.after_idle(process_audio_queue)
+    def start_shadowing(self):
+        self.logger.info('start shadowing')
+        self.tokenized_captions = self.tokenize_captions(
+            self.caption_text.get('1.0', 'end')
+        )
+        self.total_captions_words = self.tokenized_captions.total()
+        self.start_frame.grid_remove()
+        self.shadowing_frame.grid(row=0, column=0, sticky='nwes')
+        self.root.attributes("-topmost", 1)
+        self.rawinputstream.start()
+        self.process_audio_queue()
 
+    def calculate_f1_score(self):
+        p = (
+            self.true_positives / self.total_user_words
+            if self.total_user_words > 0 else 0
+        )
+        r = (
+            self.true_positives / self.total_captions_words
+            if self.total_captions_words > 0 else 0
+        )
+        f1 = (2 * p * r) / (p + r) if p + r > 0 else 0
+        p = round(p * 100)
+        r = round(r * 100)
+        f1 = round(f1 * 100)
+        if self.true_positives != self.total_user_words:
+            p = min(p, 99)
+            f1 = min(f1, 99)
+        if self.true_positives != self.total_captions_words:
+            r = min(r, 99)
+            f1 = min(f1, 99)
+        return p, r, f1
 
-def start_shadowing():
-    logger.info('start shadowing')
-    global tokenized_captions, total_captions_words
-    tokenized_captions = tokenize_captions(caption_text.get('1.0', 'end'))
-    total_captions_words = tokenized_captions.total()
-    start_frame.grid_remove()
-    shadowing_frame.grid(row=0, column=0, sticky='nwes')
-    root.attributes("-topmost", 1)
-    rawinputstream.start()
-    process_audio_queue()
+    def show_result(self):
+        self.result_frame.grid(row=0, column=0, sticky='nwe')
+        p, r, f1 = self.calculate_f1_score()
+        self.pr_result_content.set(
+            f'Precision: {p}\nRecall: {r}\nYour F1 score is ...\n'
+        )
+        self.f1_score.set(str(f1))
 
+    def finish_shadowing(self):
+        self.logger.info('finish shadowing')
+        self.rawinputstream.stop()
+        self.logger.info('rawinputstream stopped')
+        self.shadowing_frame.grid_remove()
 
-def calculate_f1_score():
-    p = (true_positives / total_user_words if total_user_words > 0
-         else 0)
-    r = (true_positives / total_captions_words if total_captions_words > 0
-         else 0)
-    f1 = (2 * p * r) / (p + r) if p + r > 0 else 0
+    def on_closing(self):
+        with open('config-geometry.json', 'w') as fout:
+            json.dump(self.root.geometry(), fout)
+        self.root.destroy()
 
-    p = round(p * 100)
-    r = round(r * 100)
-    f1 = round(f1 * 100)
-    if true_positives != total_user_words:
-        p = min(p, 99)
-        f1 = min(f1, 99)
-    if true_positives != total_captions_words:
-        r = min(r, 99)
-        f1 = min(f1, 99)
-    return p, r, f1
+    def callback_rawinputstream(self, indata, frames, time_, status):
+        self.audio_queue.put(bytes(indata))
+        self.logger.debug(
+            'audio_queue pushed. '
+            f'remaining queue size: {self.audio_queue.qsize()}'
+        )
 
-
-def show_result():
-    result_frame.grid(row=0, column=0, sticky='nwe')
-    p, r, f1 = calculate_f1_score()
-    pr_result_content.set(f'Precision: {p}\nRecall: {r}\n'
-                          'Your F1 score is ...\n')
-    f1_score.set(str(f1))
-
-
-def finish_shadowing():
-    logger.info('finish shadowing')
-    rawinputstream.stop()
-    logger.info('rawinputstream stopped')
-    shadowing_frame.grid_remove()
-
-
-def on_closing():
-    with open('config-geometry.json', 'w') as fout:
-        json.dump(root.geometry(), fout)
-    root.destroy()
-
-
-root = Tk()
-if not os.path.exists('config-geometry.json'):
-    shutil.copy('config-geometry-default.json', 'config-geometry.json')
-with open('config-geometry.json') as fin:
-    root.geometry(json.load(fin))
-root.title('I-shadow')
-root.rowconfigure(0, weight=1)
-root.columnconfigure(0, weight=1)
-root.protocol('WM_DELETE_WINDOW', on_closing)
-
-
-start_frame = ttk.Frame(root)
-start_frame.grid(row=0, column=0, sticky='nwes')
-mic_off_icon = PhotoImage(file='icon/mic_off.png')
-start_button = ttk.Button(start_frame, image=mic_off_icon,
-                          command=start_shadowing)
-start_button.grid(row=0, column=0, columnspan=2)
-notice = ttk.Label(start_frame, text='The icon is designed by SumberRejeki '
-                                     'from Flaticon')
-notice.grid(row=1, column=0, columnspan=2)
-
-caption_text = Text(start_frame, wrap='none')
-xs = ttk.Scrollbar(start_frame, orient='horizontal',
-                   command=caption_text.xview)
-ys = ttk.Scrollbar(start_frame, orient='vertical',
-                   command=caption_text.yview)
-caption_text['xscrollcommand'] = xs.set
-caption_text['yscrollcommand'] = ys.set
-caption_text.grid(row=2, column=0, sticky='nwes')
-xs.grid(row=3, column=0, sticky='we')
-ys.grid(row=2, column=1, sticky='ns')
-start_frame.grid_rowconfigure(2, weight=1)
-start_frame.grid_columnconfigure(0, weight=1)
-
-shadowing_frame = ttk.Frame(root)
-mic_on_icon = PhotoImage(file='icon/mic_on.png')
-stop_button = ttk.Button(shadowing_frame, image=mic_on_icon,
-                         command=finish_shadowing)
-stop_button.grid(row=0, column=0)
-notice = ttk.Label(shadowing_frame, text='The icon is designed by '
-                                         'SumberRejeki from Flaticon')
-notice.grid(row=1, column=0)
-shadowing_text = Text(shadowing_frame, wrap='word', state='disabled')
-shadowing_text.tag_configure('correct', foreground='#00FF00')
-shadowing_text.tag_configure('incorrect', foreground='#FF0000')
-shadowing_text.tag_configure('partial_correct', foreground='#CCFFCC')
-shadowing_text.tag_configure('partial_incorrect', foreground='#FFCCCC')
-shadowing_text.grid(row=2, column=0, sticky='nwes')
-shadowing_frame.grid_rowconfigure(2, weight=1)
-shadowing_frame.grid_columnconfigure(0, weight=1)
-
-result_frame = ttk.Frame(root)
-pr_result_content = StringVar()
-pr_result = ttk.Label(result_frame, textvariable=pr_result_content)
-f1_score = StringVar()
-f1_score_label = ttk.Label(result_frame, textvariable=f1_score)
-pr_result.grid(row=0, column=0)
-f1_score_label.grid(row=1, column=0)
-result_frame.grid_rowconfigure(1, weight=1)
-result_frame.grid_columnconfigure(0, weight=1)
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARNING)
-
-model = vosk.Model(lang='en-us')
-device = sd.query_devices(kind='input')
-assert isinstance(device, dict)
-samplerate = device['default_samplerate']
-recognizer = vosk.KaldiRecognizer(model, int(samplerate))
+    def run(self):
+        try:
+            self.root.mainloop()
+        finally:
+            self.rawinputstream.close()
 
 
-def callback_rawinputstream(indata, frames, time, status):
-    audio_queue.put(bytes(indata))
-    logger.debug('audio_queue pushed. '
-                 f'remaining queue size: {audio_queue.qsize()}')
-
-
-rawinputstream = sd.RawInputStream(samplerate=samplerate, dtype='int16',
-                                   channels=1,
-                                   callback=callback_rawinputstream)
-
-try:
-    root.mainloop()
-finally:
-    rawinputstream.close()
+if __name__ == '__main__':
+    app = IShadowApp()
+    app.run()
