@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:b7870d2c21cb92bec3c2a1c3ab9c19a6756bd8113f6b872826f2e1b3020642e9"
+content_hash = "sha256:719ed7f38394dd1020aa5aaa6ea319f5faf5791493596199393d3ac0e59f73eb"
 
 [[metadata.targets]]
 requires_python = "==3.12.*"
@@ -233,6 +233,17 @@ summary = "A tiny library for parsing, modifying, and composing SRT files."
 groups = ["default"]
 files = [
     {file = "srt-3.5.3.tar.gz", hash = "sha256:4884315043a4f0740fd1f878ed6caa376ac06d70e135f306a6dc44632eed0cc0"},
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+requires_python = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
+summary = "Python Library for Tom's Obvious, Minimal Language"
+groups = ["default"]
+files = [
+    {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
+    {file = "toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f"},
 ]
 
 [[package]]
