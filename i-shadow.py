@@ -11,6 +11,7 @@ from tkinter import PhotoImage, StringVar, Text, Tk, ttk
 
 import nltk
 import sounddevice as sd
+import toml
 import vosk
 
 
@@ -137,9 +138,15 @@ class IShadowApp:
             self.result_frame,
             textvariable=self.f1_score
         )
+        pyproject = toml.load('pyproject.toml')
+        self.version_info = ttk.Label(
+            self.result_frame,
+            text=f'(I-shadow ver. {pyproject['project']['version']})'
+        )
         self.pr_result.grid(row=0, column=0)
         self.f1_score_label.grid(row=1, column=0)
-        self.result_frame.grid_rowconfigure(1, weight=1)
+        self.version_info.grid(row=2, column=0)
+        self.result_frame.grid_rowconfigure(2, weight=1)
         self.result_frame.grid_columnconfigure(0, weight=1)
 
     def tokenize_captions_per_line(self, caption: str) -> Counter[str]:
