@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:719ed7f38394dd1020aa5aaa6ea319f5faf5791493596199393d3ac0e59f73eb"
+content_hash = "sha256:825b04f40e42b12fad17c28468c773cc11cc98de9e0b9dd4c4d903ac443048f1"
 
 [[metadata.targets]]
 requires_python = "==3.12.*"
@@ -258,6 +258,17 @@ dependencies = [
 files = [
     {file = "tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2"},
     {file = "tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2"},
+]
+
+[[package]]
+name = "types-toml"
+version = "0.10.8.20240310"
+requires_python = ">=3.8"
+summary = "Typing stubs for toml"
+groups = ["dev"]
+files = [
+    {file = "types-toml-0.10.8.20240310.tar.gz", hash = "sha256:3d41501302972436a6b8b239c850b26689657e25281b48ff0ec06345b8830331"},
+    {file = "types_toml-0.10.8.20240310-py3-none-any.whl", hash = "sha256:627b47775d25fa29977d9c70dc0cbab3f314f32c8d8d0c012f2ef5de7aaec05d"},
 ]
 
 [[package]]
