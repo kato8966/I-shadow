@@ -308,6 +308,7 @@ class IShadowApp:
         self.logger.info('finish shadowing')
         self.rawinputstream.stop()
         self.logger.info('rawinputstream stopped')
+        self.root.attributes("-topmost", 0)
         self.shadowing_frame.grid_remove()
         self.processing_audio_frame.grid(
             row=0, column=0, sticky='nwe'
