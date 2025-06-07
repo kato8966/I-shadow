@@ -4,6 +4,8 @@ import logging
 import operator
 import os
 import shutil
+import urllib.parse
+import webbrowser
 from collections import Counter
 from queue import Queue
 from time import time
@@ -139,14 +141,21 @@ class IShadowApp:
             textvariable=self.f1_score
         )
         pyproject = toml.load('pyproject.toml')
+        self.version = pyproject['project']['version']
         self.version_info = ttk.Label(
             self.result_frame,
-            text=f'(I-shadow ver. {pyproject['project']['version']})'
+            text=f'(I-shadow ver. {self.version})'
+        )
+        self.post_to_x_button = ttk.Button(
+            self.result_frame,
+            text='Post result to X',
+            command=self.post_result_to_x
         )
         self.pr_result.grid(row=0, column=0)
         self.f1_score_label.grid(row=1, column=0)
         self.version_info.grid(row=2, column=0)
-        self.result_frame.grid_rowconfigure(2, weight=1)
+        self.post_to_x_button.grid(row=3, column=0)
+        self.result_frame.grid_rowconfigure(3, weight=1)
         self.result_frame.grid_columnconfigure(0, weight=1)
 
     def tokenize_captions_per_line(self, caption: str) -> Counter[str]:
@@ -283,6 +292,17 @@ class IShadowApp:
             f'Precision: {p}\nRecall: {r}\nYour F1 score is ...\n'
         )
         self.f1_score.set(str(f1))
+
+    def post_result_to_x(self):
+        p, r, f1 = self.calculate_f1_score()
+        result_text = ('I just finished shadowing ***!\n\n'
+                       f'Precision: {p}, Recall: {r}, F1 Score: {f1} '
+                       f'(ver. {self.version})')
+        encoded_text = urllib.parse.quote(result_text)
+        url = (f'https://twitter.com/intent/tweet?text={encoded_text}'
+               f'&url=https://github.com/kato8966/I-shadow'
+               '&hashtags=IshadowApp')
+        webbrowser.open(url)
 
     def finish_shadowing(self):
         self.logger.info('finish shadowing')
