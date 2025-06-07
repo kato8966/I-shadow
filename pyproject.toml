@@ -1,6 +1,6 @@
 [project]
 name = "I-shadow"
-version = "2025.02.09"
+version = "2025.06.07"
 description = "Default template for PDM package"
 authors = [
     {name = "Katô Taisei", email = "katotaisei064@gmail.com"},
